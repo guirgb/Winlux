@@ -34,8 +34,9 @@ fi
 
 if [[ "${IS_TERMUX}" -eq 1 ]]; then
   command -v pkg >/dev/null 2>&1 || fail "Termux não foi detectado corretamente; instale o Termux pelo F-Droid ou GitHub oficial"
-  log "Termux detectado; instalando ferramentas sem sudo"
+  log "Termux detectado; atualizando pacotes sem sudo"
   pkg update -y
+  pkg upgrade -y
   pkg install -y git curl ca-certificates build-essential
   if [[ -f "${SOURCE_DIR}/requirements.txt" ]]; then
     pkg install -y python
