@@ -4,7 +4,13 @@ Um Linux leve e rápido para seu terminal.
 
 ## Instalação
 
-A partir de uma máquina Ubuntu ou Debian, execute esta única linha para baixar o repositório e instalar os arquivos e dependências:
+A partir do Termux, execute esta linha, sem usar `sudo`:
+
+```bash
+git clone https://github.com/guirgb/Winlux.git && cd Winlux && bash install.sh
+```
+
+No Ubuntu ou Debian, use:
 
 ```bash
 git clone https://github.com/guirgb/Winlux.git && cd Winlux && sudo bash install.sh
@@ -15,8 +21,8 @@ O instalador `install.sh`:
 - instala as ferramentas básicas (`git`, `curl`, certificados e compilador);
 - instala Python e as dependências de `requirements.txt`, se esse arquivo existir;
 - instala Node.js/npm e as dependências de `package.json`, se esse arquivo existir;
-- copia os arquivos para `/opt/winlux`;
-- cria o comando global `winlux` em `/usr/local/bin/winlux`.
+- copia os arquivos para `/opt/winlux` no Ubuntu/Debian ou `$PREFIX/opt/winlux` no Termux;
+- cria o comando `winlux` em `/usr/local/bin/winlux` no Ubuntu/Debian ou `$PREFIX/bin/winlux` no Termux.
 
 O script pode ser executado novamente sem precisar remover a instalação. Para usar outro diretório de destino:
 

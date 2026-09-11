@@ -2,14 +2,22 @@
 set -Eeuo pipefail
 
 APP_NAME="winlux"
-INSTALL_DIR="${WINLUX_INSTALL_DIR:-/opt/${APP_NAME}}"
-BIN_PATH="/usr/local/bin/${APP_NAME}"
 REPO_URL="${WINLUX_REPO_URL:-https://github.com/guirgb/Winlux.git}"
+IS_TERMUX=0
+if [[ -n "${PREFIX:-}" && -d "${PREFIX}/bin" ]] || [[ "${OSTYPE:-}" == "android"* ]] || [[ -n "${TERMUX_VERSION:-}" ]]; then
+  IS_TERMUX=1
+fi
+
+if [[ "${IS_TERMUX}" -eq 1 ]]; then
+  INSTALL_DIR="${WINLUX_INSTALL_DIR:-${PREFIX}/opt/${APP_NAME}}"
+  BIN_PATH="${PREFIX}/bin/${APP_NAME}"
+else
+  INSTALL_DIR="${WINLUX_INSTALL_DIR:-/opt/${APP_NAME}}"
+  BIN_PATH="/usr/local/bin/${APP_NAME}"
+fi
 
 log() { printf '[winlux] %s\n' "$*"; }
 fail() { printf '[winlux] erro: %s\n' "$*" >&2; exit 1; }
-
-[[ "${EUID}" -eq 0 ]] || fail "execute com sudo: sudo bash install.sh"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_DIR="${WINLUX_SOURCE_DIR:-${SCRIPT_DIR}}"
@@ -17,7 +25,6 @@ TEMP_DIR=""
 cleanup() { [[ -n "${TEMP_DIR}" ]] && rm -rf -- "${TEMP_DIR}" || true; }
 trap cleanup EXIT
 
-# Quando o script for baixado e executado fora de um clone, baixa o repositório.
 if [[ ! -d "${SOURCE_DIR}/.git" && "${SOURCE_DIR}" == "/tmp"* ]]; then
   TEMP_DIR="$(mktemp -d)"
   log "baixando arquivos de ${REPO_URL}"
@@ -25,31 +32,46 @@ if [[ ! -d "${SOURCE_DIR}/.git" && "${SOURCE_DIR}" == "/tmp"* ]]; then
   SOURCE_DIR="${TEMP_DIR}/repo"
 fi
 
-command -v apt-get >/dev/null 2>&1 || fail "este instalador requer uma distribuição baseada em Debian/Ubuntu"
-export DEBIAN_FRONTEND=noninteractive
-
-log "instalando ferramentas básicas"
-apt-get update -y
-apt-get install -y ca-certificates git curl build-essential
-
-# Dependências opcionais, instaladas somente quando os respectivos arquivos existem.
-if [[ -f "${SOURCE_DIR}/requirements.txt" ]]; then
-  apt-get install -y python3 python3-pip python3-venv
-fi
-if [[ -f "${SOURCE_DIR}/package.json" ]]; then
-  apt-get install -y nodejs npm
+if [[ "${IS_TERMUX}" -eq 1 ]]; then
+  command -v pkg >/dev/null 2>&1 || fail "Termux não foi detectado corretamente; instale o Termux pelo F-Droid ou GitHub oficial"
+  log "Termux detectado; instalando ferramentas sem sudo"
+  pkg update -y
+  pkg install -y git curl ca-certificates build-essential
+  if [[ -f "${SOURCE_DIR}/requirements.txt" ]]; then
+    pkg install -y python
+  fi
+  if [[ -f "${SOURCE_DIR}/package.json" ]]; then
+    pkg install -y nodejs
+  fi
+else
+  command -v apt-get >/dev/null 2>&1 || fail "este instalador requer Ubuntu/Debian ou Termux"
+  [[ "${EUID}" -eq 0 ]] || fail "no Ubuntu/Debian execute com sudo: sudo bash install.sh"
+  export DEBIAN_FRONTEND=noninteractive
+  log "Ubuntu/Debian detectado; instalando ferramentas básicas"
+  apt-get update -y
+  apt-get install -y ca-certificates git curl build-essential
+  if [[ -f "${SOURCE_DIR}/requirements.txt" ]]; then
+    apt-get install -y python3 python3-pip python3-venv
+  fi
+  if [[ -f "${SOURCE_DIR}/package.json" ]]; then
+    apt-get install -y nodejs npm
+  fi
 fi
 
 log "copiando arquivos para ${INSTALL_DIR}"
-install -d -m 0755 "${INSTALL_DIR}"
-# Não copia o próprio destino para evitar recursão quando INSTALL_DIR estiver dentro do projeto.
+mkdir -p "${INSTALL_DIR}"
 find "${SOURCE_DIR}" -mindepth 1 -maxdepth 1 ! -name .git ! -name "$(basename -- "${INSTALL_DIR}")" -exec cp -a {} "${INSTALL_DIR}/" \;
 
 if [[ -f "${INSTALL_DIR}/requirements.txt" ]]; then
   log "instalando dependências Python"
-  python3 -m venv "${INSTALL_DIR}/.venv"
-  "${INSTALL_DIR}/.venv/bin/pip" install --upgrade pip
-  "${INSTALL_DIR}/.venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt"
+  if [[ "${IS_TERMUX}" -eq 1 ]]; then
+    python -m pip install --upgrade pip
+    python -m pip install -r "${INSTALL_DIR}/requirements.txt"
+  else
+    python3 -m venv "${INSTALL_DIR}/.venv"
+    "${INSTALL_DIR}/.venv/bin/pip" install --upgrade pip
+    "${INSTALL_DIR}/.venv/bin/pip" install -r "${INSTALL_DIR}/requirements.txt"
+  fi
 fi
 
 if [[ -f "${INSTALL_DIR}/package.json" ]]; then
@@ -61,25 +83,27 @@ if [[ -f "${INSTALL_DIR}/package.json" ]]; then
   fi
 fi
 
-# Se houver um executável principal, cria um comando global para ele.
 if [[ -f "${INSTALL_DIR}/bin/${APP_NAME}" ]]; then
-  install -m 0755 "${INSTALL_DIR}/bin/${APP_NAME}" "${BIN_PATH}"
+  cp -f "${INSTALL_DIR}/bin/${APP_NAME}" "${BIN_PATH}"
 elif [[ -f "${INSTALL_DIR}/${APP_NAME}" ]]; then
-  install -m 0755 "${INSTALL_DIR}/${APP_NAME}" "${BIN_PATH}"
+  cp -f "${INSTALL_DIR}/${APP_NAME}" "${BIN_PATH}"
 elif [[ -f "${INSTALL_DIR}/main.py" ]]; then
+  if [[ "${IS_TERMUX}" -eq 1 ]]; then
+    PYTHON_CMD="python"
+  else
+    PYTHON_CMD="${INSTALL_DIR}/.venv/bin/python"
+  fi
   cat > "${BIN_PATH}" <<EOF
 #!/usr/bin/env bash
-exec "${INSTALL_DIR}/.venv/bin/python" "${INSTALL_DIR}/main.py" "\$@"
+exec ${PYTHON_CMD@Q} ${INSTALL_DIR@Q}/main.py "\$@"
 EOF
-  chmod 0755 "${BIN_PATH}"
 else
-  # Mantém um comando útil mesmo enquanto o projeto ainda não possui um executável.
   cat > "${BIN_PATH}" <<EOF
 #!/usr/bin/env bash
 printf '%s\\n' 'Winlux instalado em ${INSTALL_DIR}. Adicione o executável do projeto e execute novamente o instalador.'
 EOF
-  chmod 0755 "${BIN_PATH}"
 fi
+chmod 0755 "${BIN_PATH}"
 
 log "instalação concluída"
 log "arquivos: ${INSTALL_DIR}"
